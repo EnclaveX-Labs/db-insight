@@ -138,7 +138,7 @@ def ai() -> None:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    console.print(f"[green]Connected to {settings.model_provider}.[/green]")
+    console.print("[green]Connected to Ollama.[/green]")
     if "url" in health:
         console.print(f"url: {health['url']}")
     console.print(f"model: {health['model']}")
@@ -194,8 +194,14 @@ def ask(
 
 
 @app.command()
-def mcp() -> None:
+def mcp(
+    transport: str = typer.Option(
+        "stdio",
+        "--transport",
+        help="MCP transport: stdio, streamable-http, or sse.",
+    ),
+) -> None:
     """Run the local MCP stdio server."""
     from db_insight.mcp_server import main
 
-    main()
+    main(transport)

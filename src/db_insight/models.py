@@ -73,68 +73,8 @@ class OllamaClient(ModelClient):
         }
 
 
-class GeminiClient(ModelClient):
-    def __init__(self, api_key: str, model: str) -> None:
-        self.api_key = api_key
-        self.model = model
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
-
-    def generate(self, prompt: str, system: str | None = None) -> str:
-        payload: dict = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.1},
-        }
-        if system:
-            payload["systemInstruction"] = {"parts": [{"text": system}]}
-
-        try:
-            response = httpx.post(
-                f"{self.base_url}/models/{self.model}:generateContent",
-                params={"key": self.api_key},
-                json=payload,
-                timeout=120,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise DbInsightError(f"Gemini request failed: {exc.response.text}") from exc
-        except httpx.TimeoutException as exc:
-            raise DbInsightError("Gemini took too long to respond.") from exc
-        except httpx.HTTPError as exc:
-            raise DbInsightError(f"Could not connect to Gemini: {exc}") from exc
-
-        data = response.json()
-        try:
-            parts = data["candidates"][0]["content"]["parts"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise DbInsightError(f"Gemini returned an unexpected response: {data}") from exc
-        return "\n".join(str(part.get("text", "")) for part in parts).strip()
-
-    def health(self) -> dict:
-        try:
-            response = httpx.get(
-                f"{self.base_url}/models/{self.model}",
-                params={"key": self.api_key},
-                timeout=20,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise DbInsightError(f"Gemini health check failed: {exc.response.text}") from exc
-        except httpx.HTTPError as exc:
-            raise DbInsightError(f"Could not connect to Gemini: {exc}") from exc
-
-        return {"provider": "gemini", "model": self.model, "model_available": True}
-
-
 def build_model_client(settings) -> ModelClient:
-    if settings.model_provider == "gemini":
-        if not settings.gemini_api_key:
-            raise DbInsightError("GEMINI_API_KEY is required when using the Gemini provider.")
-        return GeminiClient(settings.gemini_api_key, settings.gemini_model)
-    if settings.model_provider == "ollama":
-        return OllamaClient(settings.ollama_url, settings.model)
-    raise DbInsightError(
-        "DB_INSIGHT_MODEL_PROVIDER must be either 'ollama' or 'gemini'."
-    )
+    return OllamaClient(settings.ollama_url, settings.model)
 
 
 def extract_sql(text: str) -> str:

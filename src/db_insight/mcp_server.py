@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 
 from db_insight.agent import InsightAgent
@@ -8,7 +10,11 @@ from db_insight.memory import MemoryBackedPostgresClient, SchemaMemory
 from db_insight.models import build_model_client
 from db_insight.tools import DatabaseTools
 
-mcp = FastMCP("db-insight")
+mcp = FastMCP(
+    "db-insight",
+    host=os.getenv("DB_INSIGHT_MCP_HOST", "127.0.0.1"),
+    port=int(os.getenv("DB_INSIGHT_MCP_PORT", "8000")),
+)
 
 
 def agent() -> InsightAgent:
@@ -103,5 +109,6 @@ def ask_database(question: str, approved: bool = False) -> dict:
     return agent().answer_with_tools(question, approved=approved)
 
 
-def main() -> None:
-    mcp.run(transport="stdio")
+def main(transport: str | None = None) -> None:
+    selected = transport or os.getenv("DB_INSIGHT_MCP_TRANSPORT", "stdio")
+    mcp.run(transport=selected)  # type: ignore[arg-type]

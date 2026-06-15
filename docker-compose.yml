@@ -1,0 +1,21 @@
+services:
+  db-insight:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URI: ${DATABASE_URI:?set DATABASE_URI}
+      DB_INSIGHT_MODEL: ${DB_INSIGHT_MODEL:-gemma3:latest}
+      DB_INSIGHT_OLLAMA_URL: http://ollama:11434
+      DB_INSIGHT_MCP_HOST: 0.0.0.0
+      DB_INSIGHT_MCP_PORT: 8000
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  ollama:

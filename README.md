@@ -20,7 +20,6 @@ Create `.env`:
 
 ```bash
 DATABASE_URL=postgresql://readonly:password@localhost:5432/app_db
-DB_INSIGHT_MODEL_PROVIDER=ollama
 DB_INSIGHT_MODEL=gemma3:latest
 DB_INSIGHT_OLLAMA_URL=http://localhost:11434
 ```
@@ -33,17 +32,6 @@ DATABASE_URL="postgresql://readonly:password@host.example.com:5432/app_db"
 
 `DB_INSIGHT_MODEL` is configurable so you can use the best Gemma/Ollama tag available on
 your machine.
-
-To try Gemini instead:
-
-```bash
-GEMINI_API_KEY=your-key
-DB_INSIGHT_MODEL_PROVIDER=gemini
-DB_INSIGHT_GEMINI_MODEL=gemini-2.5-pro
-```
-
-If `GEMINI_API_KEY` is present and `DB_INSIGHT_MODEL_PROVIDER` is omitted, Gemini is used
-automatically.
 
 ## CLI
 
@@ -94,3 +82,116 @@ This exposes safe local tools over stdio for MCP clients:
 In a full MCP client, the LLM decides which tools to call. `ask_database` is a
 convenience tool that performs that decision loop inside this local server while
 still requiring explicit approval before execution.
+
+## Remote MCP server
+
+For team use, run the same server over HTTP:
+
+```bash
+DB_INSIGHT_MCP_HOST=0.0.0.0 \
+DB_INSIGHT_MCP_PORT=8000 \
+db-insight mcp --transport streamable-http
+```
+
+The HTTP MCP endpoint is:
+
+```text
+http://your-host:8000/mcp
+```
+
+Put it behind your existing auth layer, VPN, or private network. Do not expose a
+database-backed MCP server directly to the public internet.
+
+## Docker
+
+Build the image:
+
+```bash
+docker build -t db-insight:latest .
+```
+
+Or use the published image:
+
+```bash
+docker pull ghcr.io/enclavex-labs/db-insight:latest
+```
+
+Install Gemma on the host Docker server:
+
+```bash
+ollama pull gemma3:latest
+```
+
+Configure your MCP client to launch the container over stdio:
+
+```json
+{
+  "mcpServers": {
+    "db-insight": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--add-host=host.docker.internal:host-gateway",
+        "-e",
+        "DATABASE_URI",
+        "-e",
+        "DB_INSIGHT_MODEL",
+        "-e",
+        "DB_INSIGHT_OLLAMA_URL",
+        "ghcr.io/enclavex-labs/db-insight:latest"
+      ],
+      "env": {
+        "DATABASE_URI": "user_url",
+        "DB_INSIGHT_MODEL": "gemma3:latest",
+        "DB_INSIGHT_OLLAMA_URL": "http://host.docker.internal:11434"
+      }
+    }
+  }
+}
+```
+
+For VS Code/Copilot, use `servers` instead of `mcpServers`:
+
+```json
+{
+  "servers": {
+    "db-insight": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--add-host=host.docker.internal:host-gateway",
+        "-e",
+        "DATABASE_URI",
+        "-e",
+        "DB_INSIGHT_MODEL",
+        "-e",
+        "DB_INSIGHT_OLLAMA_URL",
+        "ghcr.io/enclavex-labs/db-insight:latest"
+      ],
+      "env": {
+        "DATABASE_URI": "user_url",
+        "DB_INSIGHT_MODEL": "gemma3:latest",
+        "DB_INSIGHT_OLLAMA_URL": "http://host.docker.internal:11434"
+      }
+    }
+  }
+}
+```
+
+Each user fills `DATABASE_URI` with their own Postgres connection string.
+If that URI uses `localhost` or `127.0.0.1`, the Docker image remaps it to
+`host.docker.internal` automatically.
+
+If you need a long-running shared HTTP endpoint instead, run:
+
+```bash
+docker run --rm -p 8000:8000 \
+  --add-host=host.docker.internal:host-gateway \
+  -e DATABASE_URI=user_url \
+  -e DB_INSIGHT_OLLAMA_URL=http://host.docker.internal:11434 \
+  ghcr.io/enclavex-labs/db-insight:latest db-insight mcp --transport streamable-http
+```

@@ -6,6 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from db_insight.agent import InsightAgent
 from db_insight.config import load_settings
+from db_insight.db import build_db_client
 from db_insight.memory import MemoryBackedPostgresClient, SchemaMemory
 from db_insight.models import build_model_client
 from db_insight.tools import DatabaseTools
@@ -19,14 +20,14 @@ mcp = FastMCP(
 
 def agent() -> InsightAgent:
     settings = load_settings()
-    db = MemoryBackedPostgresClient(settings.database_url, settings.query_timeout_seconds)
+    db = build_db_client(settings.database_url, settings.query_timeout_seconds)
     model = build_model_client(settings)
     return InsightAgent(db, model, settings.default_limit)
 
 
 def tools() -> DatabaseTools:
     settings = load_settings()
-    db = MemoryBackedPostgresClient(settings.database_url, settings.query_timeout_seconds)
+    db = build_db_client(settings.database_url, settings.query_timeout_seconds)
     model = build_model_client(settings)
     return DatabaseTools(db, model, settings.default_limit)
 
@@ -48,6 +49,8 @@ def discover_schema() -> str:
 def refresh_schema_memory() -> dict:
     """Refresh and persist the local schema memory for this database."""
     settings = load_settings()
+    if settings.database_url.startswith(("sqlite://", "sqlite3://")):
+        return {"message": "SQLite schema is read directly; no schema memory refresh needed."}
     db = MemoryBackedPostgresClient(
         settings.database_url,
         settings.query_timeout_seconds,
@@ -105,10 +108,18 @@ def run_approved_sql(question: str, sql: str) -> dict:
 
 @mcp.tool()
 def ask_database(question: str, approved: bool = False) -> dict:
-    """Let the LLM plan MCP tool calls, generate safe SQL, and optionally run it."""
+    """Generate SQL, run it when approved, and return the final rows plus summary.
+
+    Use this as the final answer source. If status is "complete", do not call more
+    schema or SQL tools for the same question unless the user asks a follow-up.
+    """
     return agent().answer_with_tools(question, approved=approved)
 
 
 def main(transport: str | None = None) -> None:
     selected = transport or os.getenv("DB_INSIGHT_MCP_TRANSPORT", "stdio")
     mcp.run(transport=selected)  # type: ignore[arg-type]
+
+
+if __name__ == "__main__":
+    main()

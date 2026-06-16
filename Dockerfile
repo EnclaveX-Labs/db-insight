@@ -12,6 +12,7 @@ ENV DB_INSIGHT_MCP_PORT=8000
 ENV DB_INSIGHT_OLLAMA_URL=http://host.docker.internal:11434
 ENV DB_INSIGHT_MODEL=gemma3:latest
 
+VOLUME ["/data"]
 EXPOSE 8000
 
 CMD ["db-insight", "mcp"]

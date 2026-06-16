@@ -7,7 +7,7 @@ import re
 import sqlglot
 from sqlglot import exp
 
-from db_insight.db import PostgresClient
+from db_insight.db import PostgresClient, SQLiteClient
 from db_insight.errors import DbInsightError
 from db_insight.models import ModelClient
 from db_insight.safety import UnsafeSqlError, mask_pii_rows, validate_select_only
@@ -33,7 +33,7 @@ class ToolCall:
 class DatabaseTools:
     """MCP-style tool implementations used by both CLI and MCP server."""
 
-    def __init__(self, db: PostgresClient, model: ModelClient, default_limit: int) -> None:
+    def __init__(self, db: PostgresClient | SQLiteClient, model: ModelClient, default_limit: int) -> None:
         self.db = db
         self.model = model
         self.default_limit = default_limit
@@ -55,7 +55,7 @@ class DatabaseTools:
 
     def explain_sql(self, sql: str) -> dict[str, Any]:
         try:
-            safe_sql = validate_select_only(sql, self.default_limit)
+            safe_sql = validate_select_only(sql, self.default_limit, self.db.sql_dialect)
         except UnsafeSqlError as exc:
             raise DbInsightError(f"SQL was blocked by the safety validator: {exc}") from exc
         return self.db.explain_query(safe_sql)
@@ -69,7 +69,7 @@ class DatabaseTools:
 
         deterministic_sql = self._deterministic_sql(question)
         if deterministic_sql:
-            safe_sql = validate_select_only(deterministic_sql, self.default_limit)
+            safe_sql = validate_select_only(deterministic_sql, self.default_limit, self.db.sql_dialect)
             if not self._is_trusted_catalog_sql(deterministic_sql):
                 self._validate_sql_against_schema(safe_sql)
             return safe_sql
@@ -82,7 +82,7 @@ Question:
 {question}
 
 Rules:
-- Return exactly one Postgres SELECT query.
+- Return exactly one {self.db.sql_dialect} SELECT query.
 - You MUST use only tables and columns listed in Relevant schema.
 - Do not infer columns from table names.
 - If the question asks for a count/ranking, check whether the count exists as a column on an entity table before using an event table.
@@ -96,7 +96,7 @@ Rules:
         from db_insight.models import extract_sql
 
         try:
-            safe_sql = validate_select_only(extract_sql(raw), self.default_limit)
+            safe_sql = validate_select_only(extract_sql(raw), self.default_limit, self.db.sql_dialect)
             self._validate_sql_against_schema(safe_sql)
             return safe_sql
         except UnsafeSqlError as exc:
@@ -104,7 +104,7 @@ Rules:
 
     def run_approved_sql(self, sql: str) -> list[dict[str, Any]]:
         try:
-            safe_sql = validate_select_only(sql, self.default_limit)
+            safe_sql = validate_select_only(sql, self.default_limit, self.db.sql_dialect)
         except UnsafeSqlError as exc:
             raise DbInsightError(f"SQL was blocked by the safety validator: {exc}") from exc
         return mask_pii_rows(self.db.run_query(safe_sql))

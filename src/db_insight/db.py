@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import sqlite3
 from typing import Any
+from urllib.parse import unquote, urlparse
 
-import psycopg
-from psycopg.rows import dict_row
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # pragma: no cover - exercised when only SQLite support is installed.
+    psycopg = None  # type: ignore[assignment]
+    dict_row = None  # type: ignore[assignment]
 
 from db_insight.errors import DbInsightError
 
@@ -59,11 +66,15 @@ class SchemaOverview:
 
 
 class PostgresClient:
+    sql_dialect = "postgres"
+
     def __init__(self, database_url: str, timeout_seconds: int = 20) -> None:
         self.database_url = database_url
         self.timeout_seconds = timeout_seconds
 
     def connect(self) -> psycopg.Connection:
+        if psycopg is None or dict_row is None:
+            raise DbInsightError("Postgres support requires installing psycopg.")
         try:
             conn = psycopg.connect(self.database_url, row_factory=dict_row)
             conn.execute(f"SET statement_timeout = {self.timeout_seconds * 1000}")
@@ -293,6 +304,132 @@ class PostgresClient:
             ) from exc
         except psycopg.Error as exc:
             raise DbInsightError(f"Postgres rejected the query: {exc}") from exc
+
+
+class SQLiteClient:
+    sql_dialect = "sqlite"
+
+    def __init__(self, database_url: str, timeout_seconds: int = 20) -> None:
+        self.database_url = database_url
+        self.timeout_seconds = timeout_seconds
+        self.path = _sqlite_path(database_url)
+
+    def connect(self) -> sqlite3.Connection:
+        try:
+            conn = sqlite3.connect(f"file:{Path(self.path).as_posix()}?mode=ro", timeout=self.timeout_seconds, uri=True)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except sqlite3.Error as exc:
+            raise DbInsightError(f"Could not connect to SQLite database at {self.path}.") from exc
+
+    def validate_readonly(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("PRAGMA query_only").fetchone()
+        return {"database": str(self.path), "query_only": bool(row[0]) if row else True}
+
+    def discover_schema(self, include_extensions: bool = False) -> list[Column]:
+        del include_extensions
+        with self.connect() as conn:
+            tables = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+            columns: list[Column] = []
+            for table in tables:
+                table_name = table["name"]
+                for row in conn.execute(f"PRAGMA table_info({_quote_sqlite_identifier(table_name)})"):
+                    columns.append(
+                        Column(
+                            table_schema="main",
+                            table_name=table_name,
+                            column_name=row["name"],
+                            data_type=row["type"] or "unknown",
+                            is_nullable=not bool(row["notnull"]),
+                        )
+                    )
+        return columns
+
+    def schema_overview(self) -> SchemaOverview:
+        tables: dict[str, list[Column]] = {}
+        for column in self.discover_schema():
+            key = f"{column.table_schema}.{column.table_name}"
+            tables.setdefault(key, []).append(column)
+        return SchemaOverview(table_count=len(tables), schemas=["main"] if tables else [], tables=tables)
+
+    def schema_prompt(self, question: str | None = None, max_tables: int | None = None) -> str:
+        return PostgresClient.schema_prompt(self, question, max_tables)  # type: ignore[arg-type]
+
+    def relevant_tables(self, question: str, max_tables: int = 8) -> dict[str, list[Column]]:
+        return PostgresClient.relevant_tables(self, question, max_tables)  # type: ignore[arg-type]
+
+    def schema_overview_text(self) -> str:
+        return PostgresClient.schema_overview_text(self)  # type: ignore[arg-type]
+
+    def table_catalog(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT name AS table_name, type, sql FROM sqlite_master "
+                "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        return [{"schema_name": "main", **dict(row)} for row in rows]
+
+    def table_details(self, table_name: str) -> dict[str, Any]:
+        overview = self.schema_overview()
+        resolved = overview.resolve_table(table_name)
+        if not resolved:
+            raise DbInsightError(f"Table '{table_name}' is not in the schema memory/catalog.")
+        _, _, name = resolved.partition(".")
+        with self.connect() as conn:
+            indexes = conn.execute(f"PRAGMA index_list({_quote_sqlite_identifier(name)})").fetchall()
+        return {
+            "table": resolved,
+            "columns": [column.__dict__ for column in overview.tables[resolved]],
+            "indexes": [dict(row) for row in indexes],
+            "constraints": [],
+        }
+
+    def explain_query(self, sql: str) -> dict[str, Any]:
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(f"EXPLAIN QUERY PLAN {sql}").fetchall()
+            return {"plan": [dict(row) for row in rows]}
+        except sqlite3.Error as exc:
+            raise DbInsightError(f"SQLite could not explain the query: {exc}") from exc
+
+    def run_query(self, sql: str) -> list[dict[str, Any]]:
+        try:
+            with self.connect() as conn:
+                rows = conn.execute(sql).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise DbInsightError(f"SQLite rejected the query: {exc}") from exc
+
+
+def build_db_client(database_url: str, timeout_seconds: int = 20):
+    if urlparse(database_url).scheme in {"sqlite", "sqlite3"}:
+        return SQLiteClient(database_url, timeout_seconds)
+
+    from db_insight.memory import MemoryBackedPostgresClient
+
+    return MemoryBackedPostgresClient(database_url, timeout_seconds)
+
+
+def _sqlite_path(database_url: str) -> str:
+    parsed = urlparse(database_url)
+    if parsed.scheme not in {"sqlite", "sqlite3"}:
+        raise DbInsightError("SQLite DATABASE_URL must start with sqlite:// or sqlite3://.")
+    if parsed.netloc and parsed.netloc != "localhost":
+        raise DbInsightError("SQLite DATABASE_URL must point to a local file.")
+    path = unquote(parsed.path)
+    if not path:
+        raise DbInsightError("SQLite DATABASE_URL is missing a file path.")
+    if path.startswith("//"):
+        path = path[1:]
+    return str(Path(path))
+
+
+def _quote_sqlite_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
 
 
 def _tokenize(value: str) -> list[str]:

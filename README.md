@@ -1,6 +1,6 @@
 # db-insight
 
-Local-first Postgres insight CLI and MCP server.
+Local-first SQL insight CLI and MCP server for Postgres and SQLite.
 
 Positioning: connect a read-only replica, analytics database, or staging database. Keep
 credentials on your machine while the tool discovers schema, generates safe SQL, previews
@@ -18,8 +18,18 @@ pip install -e ".[dev]"
 
 Create `.env`:
 
+Postgres:
+
 ```bash
 DATABASE_URL=postgresql://readonly:password@localhost:5432/app_db
+DB_INSIGHT_MODEL=gemma3:latest
+DB_INSIGHT_OLLAMA_URL=http://localhost:11434
+```
+
+SQLite:
+
+```bash
+DATABASE_URL=sqlite:///absolute/path/to/app.sqlite
 DB_INSIGHT_MODEL=gemma3:latest
 DB_INSIGHT_OLLAMA_URL=http://localhost:11434
 ```
@@ -36,7 +46,7 @@ your machine.
 ## CLI
 
 ```bash
-db-insight connect postgres
+db-insight connect
 db-insight schema --refresh
 db-insight ask "Why did revenue drop last week?"
 ```
@@ -122,7 +132,9 @@ Install Gemma on the host Docker server:
 ollama pull gemma3:latest
 ```
 
-Configure your MCP client to launch the container over stdio:
+Configure your MCP client to launch the container over stdio.
+
+Postgres:
 
 ```json
 {
@@ -135,7 +147,7 @@ Configure your MCP client to launch the container over stdio:
         "--rm",
         "--add-host=host.docker.internal:host-gateway",
         "-e",
-        "DATABASE_URI",
+        "DATABASE_URL",
         "-e",
         "DB_INSIGHT_MODEL",
         "-e",
@@ -143,7 +155,7 @@ Configure your MCP client to launch the container over stdio:
         "ghcr.io/enclavex-labs/db-insight:latest"
       ],
       "env": {
-        "DATABASE_URI": "user_url",
+        "DATABASE_URL": "postgresql://readonly:password@host.docker.internal:5432/app_db",
         "DB_INSIGHT_MODEL": "gemma3:latest",
         "DB_INSIGHT_OLLAMA_URL": "http://host.docker.internal:11434"
       }
@@ -152,11 +164,11 @@ Configure your MCP client to launch the container over stdio:
 }
 ```
 
-For VS Code/Copilot, use `servers` instead of `mcpServers`:
+SQLite:
 
 ```json
 {
-  "servers": {
+  "mcpServers": {
     "db-insight": {
       "command": "docker",
       "args": [
@@ -164,8 +176,10 @@ For VS Code/Copilot, use `servers` instead of `mcpServers`:
         "-i",
         "--rm",
         "--add-host=host.docker.internal:host-gateway",
+        "-v",
+        "/absolute/path/to/data:/data:ro",
         "-e",
-        "DATABASE_URI",
+        "DATABASE_URL",
         "-e",
         "DB_INSIGHT_MODEL",
         "-e",
@@ -173,7 +187,7 @@ For VS Code/Copilot, use `servers` instead of `mcpServers`:
         "ghcr.io/enclavex-labs/db-insight:latest"
       ],
       "env": {
-        "DATABASE_URI": "user_url",
+        "DATABASE_URL": "sqlite:////data/app.sqlite",
         "DB_INSIGHT_MODEL": "gemma3:latest",
         "DB_INSIGHT_OLLAMA_URL": "http://host.docker.internal:11434"
       }
@@ -182,16 +196,21 @@ For VS Code/Copilot, use `servers` instead of `mcpServers`:
 }
 ```
 
-Each user fills `DATABASE_URI` with their own Postgres connection string.
-If that URI uses `localhost` or `127.0.0.1`, the Docker image remaps it to
-`host.docker.internal` automatically.
+For VS Code/Copilot, use the same body under `servers` instead of `mcpServers`.
+
+Each user fills `DATABASE_URL` with their own Postgres connection string or SQLite
+file URL. For SQLite in Docker, mount the folder containing the database to `/data`
+and use four slashes: `sqlite:////data/app.sqlite`.
+
+For Postgres, if `DATABASE_URL` uses `localhost` or `127.0.0.1`, the Docker image
+remaps it to `host.docker.internal` automatically.
 
 If you need a long-running shared HTTP endpoint instead, run:
 
 ```bash
 docker run --rm -p 8000:8000 \
   --add-host=host.docker.internal:host-gateway \
-  -e DATABASE_URI=user_url \
+  -e DATABASE_URL=postgresql://readonly:password@host.docker.internal:5432/app_db \
   -e DB_INSIGHT_OLLAMA_URL=http://host.docker.internal:11434 \
   ghcr.io/enclavex-labs/db-insight:latest db-insight mcp --transport streamable-http
 ```

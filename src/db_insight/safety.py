@@ -16,11 +16,11 @@ class UnsafeSqlError(ValueError):
     pass
 
 
-def validate_select_only(sql: str, default_limit: int = 100) -> str:
+def validate_select_only(sql: str, default_limit: int = 100, dialect: str = "postgres") -> str:
     if not sql.strip():
         raise UnsafeSqlError("SQL is empty.")
 
-    statements = sqlglot.parse(sql, read="postgres")
+    statements = sqlglot.parse(sql, read=dialect)
     if len(statements) != 1:
         raise UnsafeSqlError("Only one SQL statement is allowed.")
 
@@ -48,7 +48,7 @@ def validate_select_only(sql: str, default_limit: int = 100) -> str:
     if not statement.args.get("limit"):
         statement = statement.limit(default_limit)
 
-    return statement.sql(dialect="postgres")
+    return statement.sql(dialect=dialect)
 
 
 PII_PATTERNS = [

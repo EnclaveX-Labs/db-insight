@@ -5,6 +5,8 @@ import pytest
 
 
 class FakeDb:
+    sql_dialect = "postgres"
+
     def schema_overview(self) -> SchemaOverview:
         return SchemaOverview(
             table_count=4,

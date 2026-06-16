@@ -6,37 +6,34 @@ from rich.table import Table
 
 from db_insight.agent import InsightAgent
 from db_insight.config import load_settings
-from db_insight.db import PostgresClient
+from db_insight.db import build_db_client
 from db_insight.errors import DbInsightError
 from db_insight.memory import MemoryBackedPostgresClient, SchemaMemory
 from db_insight.models import build_model_client
 
-app = typer.Typer(help="Chat with Postgres safely from your local machine.")
+app = typer.Typer(help="Chat with a local database safely from your machine.")
 console = Console()
 
 
 def build_agent() -> InsightAgent:
     settings = load_settings()
-    db = MemoryBackedPostgresClient(settings.database_url, settings.query_timeout_seconds)
+    db = build_db_client(settings.database_url, settings.query_timeout_seconds)
     model = build_model_client(settings)
     return InsightAgent(db, model, settings.default_limit)
 
 
 @app.command()
-def connect(kind: str = typer.Argument("postgres")) -> None:
+def connect() -> None:
     """Validate the local database connection."""
-    if kind != "postgres":
-        raise typer.BadParameter("Only postgres is supported in this MVP.")
-
     try:
         settings = load_settings()
-        db = PostgresClient(settings.database_url, settings.query_timeout_seconds)
+        db = build_db_client(settings.database_url, settings.query_timeout_seconds)
         info = db.validate_readonly()
     except DbInsightError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    console.print("[green]Connected to Postgres.[/green]")
+    console.print("[green]Connected.[/green]")
     for key, value in info.items():
         console.print(f"{key}: {value}")
 
@@ -49,12 +46,8 @@ def schema(
     """Print a useful database schema overview."""
     try:
         settings = load_settings()
-        db = MemoryBackedPostgresClient(
-            settings.database_url,
-            settings.query_timeout_seconds,
-            prefer_memory=not refresh,
-        )
-        if refresh:
+        db = build_db_client(settings.database_url, settings.query_timeout_seconds)
+        if refresh and isinstance(db, MemoryBackedPostgresClient):
             db.refresh_schema_memory()
         output = db.schema_prompt() if raw else db.schema_overview_text()
         console.print(output or "[yellow]No user tables found.[/yellow]")
@@ -87,20 +80,20 @@ def memory() -> None:
 
 @app.command()
 def catalog() -> None:
-    """Show Postgres catalog stats for user tables."""
+    """Show catalog stats for user tables."""
     try:
         settings = load_settings()
-        db = MemoryBackedPostgresClient(settings.database_url, settings.query_timeout_seconds)
+        db = build_db_client(settings.database_url, settings.query_timeout_seconds)
         rows = db.table_catalog()
     except DbInsightError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
     table = Table(title="Catalog")
-    for column in ("schema_name", "table_name", "approximate_rows", "seq_scan", "idx_scan"):
+    for column in ("schema_name", "table_name", "type", "approximate_rows", "seq_scan", "idx_scan"):
         table.add_column(column)
     for row in rows:
-        table.add_row(*(str(row.get(column)) for column in ("schema_name", "table_name", "approximate_rows", "seq_scan", "idx_scan")))
+        table.add_row(*(str(row.get(column, "")) for column in ("schema_name", "table_name", "type", "approximate_rows", "seq_scan", "idx_scan")))
     console.print(table)
 
 
@@ -109,7 +102,7 @@ def inspect(table_name: str) -> None:
     """Show columns, indexes, and constraints for a table."""
     try:
         settings = load_settings()
-        db = MemoryBackedPostgresClient(settings.database_url, settings.query_timeout_seconds)
+        db = build_db_client(settings.database_url, settings.query_timeout_seconds)
         details = db.table_details(table_name)
     except DbInsightError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -121,7 +114,7 @@ def inspect(table_name: str) -> None:
         console.print(f"- {column['column_name']} {column['data_type']}")
     console.print("\n[bold]Indexes[/bold]")
     for index in details["indexes"]:
-        console.print(f"- {index['indexname']}: {index['indexdef']}")
+        console.print(f"- {index}")
     console.print("\n[bold]Constraints[/bold]")
     for constraint in details["constraints"]:
         console.print(f"- {constraint['constraint_name']}: {constraint['definition']}")

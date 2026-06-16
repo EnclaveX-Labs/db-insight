@@ -4,8 +4,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URI: ${DATABASE_URI:?set DATABASE_URI}
-      DB_INSIGHT_MODEL: ${DB_INSIGHT_MODEL:-gemma3:latest}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      DB_INSIGHT_MODEL: ${DB_INSIGHT_MODEL:-hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M}
       DB_INSIGHT_OLLAMA_URL: http://ollama:11434
       DB_INSIGHT_MCP_HOST: 0.0.0.0
       DB_INSIGHT_MCP_PORT: 8000

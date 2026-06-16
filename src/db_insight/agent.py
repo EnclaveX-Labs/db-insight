@@ -4,13 +4,13 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from db_insight.db import PostgresClient
+from db_insight.db import PostgresClient, SQLiteClient
 from db_insight.models import ModelClient
 from db_insight.tools import DatabaseTools, ToolCall
 
 
 SQL_SYSTEM_PROMPT = """You are a senior analytics engineer.
-Generate one safe Postgres SELECT query that answers the user's question.
+Generate one safe SELECT query that answers the user's question.
 Use only tables and columns present in the schema.
 Return SQL only. Do not explain it.
 """
@@ -19,7 +19,7 @@ SUMMARY_SYSTEM_PROMPT = """You explain query results clearly and briefly.
 Mention uncertainty when the result is not enough to answer the question.
 """
 
-DECISION_SYSTEM_PROMPT = """You are an MCP tool planner for a local Postgres assistant.
+DECISION_SYSTEM_PROMPT = """You are an MCP tool planner for a local database assistant.
 Choose the safest useful tool sequence for the user's request.
 
 Available tools:
@@ -42,7 +42,7 @@ REQUIRED_DATABASE_FLOW = [
 
 
 class InsightAgent:
-    def __init__(self, db: PostgresClient, model: ModelClient, default_limit: int) -> None:
+    def __init__(self, db: PostgresClient | SQLiteClient, model: ModelClient, default_limit: int) -> None:
         self.tools = DatabaseTools(db, model, default_limit)
         self.model = model
         self.default_limit = default_limit

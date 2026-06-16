@@ -30,8 +30,16 @@ def load_settings(env_file: Path | None = None) -> Settings:
 
     database_url = _docker_safe_database_url(database_url)
     parsed_url = urlparse(database_url)
+    if parsed_url.scheme in {"sqlite", "sqlite3"}:
+        return Settings(
+            database_url=database_url,
+            ollama_url=os.getenv("DB_INSIGHT_OLLAMA_URL", DEFAULT_OLLAMA_URL).rstrip("/"),
+            model=os.getenv("DB_INSIGHT_MODEL", DEFAULT_OLLAMA_MODEL),
+            query_timeout_seconds=int(os.getenv("DB_INSIGHT_QUERY_TIMEOUT_SECONDS", "20")),
+            default_limit=int(os.getenv("DB_INSIGHT_DEFAULT_LIMIT", "100")),
+        )
     if parsed_url.scheme not in {"postgresql", "postgres"}:
-        raise DbInsightError("DATABASE_URL must start with postgresql:// or postgres://.")
+        raise DbInsightError("DATABASE_URL must start with postgresql://, postgres://, or sqlite://.")
     if not parsed_url.hostname:
         raise DbInsightError("DATABASE_URL is missing a hostname.")
     if any(char in parsed_url.hostname for char in ("$", " ", "\n", "\r", "\t")):

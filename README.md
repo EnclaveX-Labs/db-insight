@@ -72,6 +72,9 @@ metadata only, not table rows.
 
 ## MCP stdio server
 
+For Android health-ring chat architecture, see
+[Android Health Chat Implementation](docs/android-chat-implementation.md).
+
 ```bash
 db-insight mcp
 ```
